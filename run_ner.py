@@ -2,9 +2,9 @@ import collections
 import os
 import pickle
 from absl import flags,logging
-from bert import modeling
-from bert import optimization
-from bert import tokenization
+import modeling
+import optimization
+import tokenization
 import tensorflow as tf
 import numpy as np
 FLAGS = flags.FLAGS
@@ -43,7 +43,7 @@ flags.DEFINE_integer(
     "Sequences longer than this will be truncated, and sequences shorter "
     "than this will be padded.")
 
-flags.DEFINE_bool("do_train", False, "Whether to run training.")
+flags.DEFINE_bool("do_train", True, "Whether to run training.")
 
 flags.DEFINE_bool("do_eval", False, "Whether to run eval on the dev set.")
 
@@ -51,7 +51,7 @@ flags.DEFINE_bool(
     "do_predict", True,
     "Whether to run the model in inference mode on the test set.")
 
-flags.DEFINE_integer("train_batch_size", 16, "Total batch size for training.")
+flags.DEFINE_integer("train_batch_size", 8, "Total batch size for training.")
 
 flags.DEFINE_integer("eval_batch_size", 8, "Total batch size for eval.")
 
@@ -525,7 +525,7 @@ def main(_):
 
 
     if FLAGS.do_predict:
-        with open(FLAGS.middle_output+'/label2id.pkl', 'rb') as rf:
+        with open(FLAGS.output_dir+'/label2id.pkl', 'rb') as rf:
             label2id = pickle.load(rf)
             id2label = {value: key for key, value in label2id.items()}
    
