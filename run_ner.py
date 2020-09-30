@@ -1,15 +1,3 @@
-#! usr/bin/env python3
-# -*- coding:utf-8 -*-
-"""
-# Copyright 2018 The Google AI Language Team Authors.
-# Copyright 2019 The BioNLP-HZAU Kaiyin Zhou
-# Time:2019/04/08
-"""
-
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import collections
 import os
 import pickle
@@ -18,39 +6,31 @@ from bert import modeling
 from bert import optimization
 from bert import tokenization
 import tensorflow as tf
-import metrics
 import numpy as np
 FLAGS = flags.FLAGS
 
-## Required parameters
 flags.DEFINE_string(
-    "data_dir", None,
+    "data_dir", "./ner_data",
     "The input data dir. Should contain the .tsv files (or other data files) "
     "for the task.")
 
 flags.DEFINE_string(
-    "bert_config_file", None,
+    "bert_config_file", "./chinese_bert/bert_config.json",
     "The config json file corresponding to the pre-trained BERT model. "
     "This specifies the model architecture.")
 
-flags.DEFINE_string("task_name", None, "The name of the task to train.")
+flags.DEFINE_string("task_name","ner", "The name of the task to train.")
 
-flags.DEFINE_string("vocab_file", None,
+flags.DEFINE_string("vocab_file", "./chinese_bert/vocab.txt",
                     "The vocabulary file that the BERT model was trained on.")
 
 flags.DEFINE_string(
-    "output_dir", None,
+    "output_dir", "./output",
     "The output directory where the model checkpoints will be written.")
 
-## Other parameters
-
 flags.DEFINE_string(
-    "init_checkpoint", None,
+    "init_checkpoint", "./chinese_bert/bert_model.ckpt",
     "Initial checkpoint (usually from a pre-trained BERT model).")
-
-# if you download cased checkpoint you should use "False",if uncased you should use
-# "True"
-# if we used in bio-medical field，don't do lower case would be better!
 
 flags.DEFINE_bool(
     "do_lower_case", True,
@@ -68,7 +48,7 @@ flags.DEFINE_bool("do_train", False, "Whether to run training.")
 flags.DEFINE_bool("do_eval", False, "Whether to run eval on the dev set.")
 
 flags.DEFINE_bool(
-    "do_predict", False,
+    "do_predict", True,
     "Whether to run the model in inference mode on the test set.")
 
 flags.DEFINE_integer("train_batch_size", 16, "Total batch size for training.")
@@ -95,9 +75,8 @@ flags.DEFINE_integer("iterations_per_loop", 1000,
 
 flags.DEFINE_bool("use_tpu", False, "Whether to use TPU or GPU/CPU.")
 
+flags.DEFINE_bool("crf", True, "use crf")
 
-flags.DEFINE_string("middle_output", "middle_data", "Dir was used to store middle data!")
-flags.DEFINE_bool("crf", True, "use crf!")
 
 class InputExample(object):
   def __init__(self, guid, text, label=None):
@@ -147,7 +126,6 @@ class DataProcessor(object):
         for line in rf:
             word = line.strip().split(' ')[0]
             label = line.strip().split(' ')[-1]
-            # here we dont do "DOCSTART" check
             if len(line.strip())==0:
                 l = ' '.join([label for label in labels if len(label) > 0])
                 w = ' '.join([word for word in words if len(word) > 0])
@@ -177,11 +155,6 @@ class NerProcessor(DataProcessor):
 
 
     def get_labels(self):
-        """
-        here "X" used to represent "##eer","##soo" and so on!
-        "[PAD]" for padding
-        :return:
-        """
         return ["[PAD]", "O", "B-PER", "I-PER", "B-ORG", "I-ORG", "B-LOC", "I-LOC","[CLS]"]
 
     def _create_example(self, lines, set_type):
@@ -195,21 +168,12 @@ class NerProcessor(DataProcessor):
 
 
 def convert_single_example(ex_index, example, label_list, max_seq_length, tokenizer, mode):
-    """
-    :param ex_index: example num
-    :param example:
-    :param label_list: all labels
-    :param max_seq_length:
-    :param tokenizer: WordPiece tokenization
-    :param mode:
-    :return: feature
-    """
     label_map = {}
     #here start with zero this means that "[PAD]" is zero
     for (i,label) in enumerate(label_list):
         label_map[label] = i
     #{"[PAD]":0, "O":1, "B-PER":2, "I-PER":3, "B-ORG":4, "I-ORG":5, "B-LOC":6,"I-LOC":7,"[CLS]":8}
-    with open(FLAGS.middle_output+"/label2id.pkl",'wb') as w:
+    with open(FLAGS.output_dir+"/label2id.pkl",'wb') as w:
         pickle.dump(label_map,w)
     textlist = example.text.split(' ')
     labellist = example.label.split(' ')#在这里进行切分，之前都是字符串
@@ -232,9 +196,7 @@ def convert_single_example(ex_index, example, label_list, max_seq_length, tokeni
         ntokens.append(token)
         segment_ids.append(0)
         label_ids.append(label_map[labels[i]])
-    # after that we don't add "[SEP]" because we want a sentence don't have
-    # stop tag, because i think its not very necessary.
-    # or if add "[SEP]" the model even will cause problem, special the crf layer was used.
+
     input_ids = tokenizer.convert_tokens_to_ids(ntokens)#这一步就会把单词转换成在vocab中的id，由于
     #我们我们没有加SEP，所以转回来input_ids是没有SEP的id的
     mask = [1]*len(input_ids)
@@ -267,7 +229,7 @@ def convert_single_example(ex_index, example, label_list, max_seq_length, tokeni
         segment_ids=segment_ids,
         label_ids=label_ids,
     )
-    # we need ntokens because if we do predict it can help us return to original token.
+
     return feature,ntokens,label_ids
 
 def filed_based_convert_examples_to_features(examples, label_list, max_seq_length, tokenizer, output_file,mode=None):
@@ -329,8 +291,6 @@ def file_based_input_fn_builder(input_file, seq_length, is_training, drop_remain
         return d
     return input_fn
 
-# all above are related to data preprocess
-# Following i about the model
 
 def hidden2tag(hiddenlayer,numclass):
     linear = tf.keras.layers.Dense(numclass,activation=None)
@@ -432,20 +392,20 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
                 loss=total_loss,
                 train_op=train_op)
 
-        elif mode == tf.estimator.ModeKeys.EVAL:
-            def metric_fn(label_ids, logits,num_labels,mask):
-                predictions = tf.argmax(logits, axis=-1, output_type=tf.int32)
-                assert len(predictions.get_shape().as_list())==2#(batch_size,seq_length)
-                cm = metrics.streaming_confusion_matrix(label_ids, predictions, num_labels-1, weights=mask)#减一是减去PAD
-                return {
-                    "confusion_matrix":cm
-                }
+        # elif mode == tf.estimator.ModeKeys.EVAL:
+        #     def metric_fn(label_ids, logits,num_labels,mask):
+        #         predictions = tf.argmax(logits, axis=-1, output_type=tf.int32)
+        #         assert len(predictions.get_shape().as_list())==2#(batch_size,seq_length)
+        #         cm = metrics.streaming_confusion_matrix(label_ids, predictions, num_labels-1, weights=mask)#减一是减去PAD
+        #         return {
+        #             "confusion_matrix":cm
+        #         }
                 
-            eval_metrics = metric_fn(label_ids, logits, num_labels, mask)
-            output_spec = tf.estimator.EstimatorSpec(
-                mode=mode,
-                loss=total_loss,
-                eval_metric_ops=eval_metrics)
+        #     eval_metrics = metric_fn(label_ids, logits, num_labels, mask)
+        #     output_spec = tf.estimator.EstimatorSpec(
+        #         mode=mode,
+        #         loss=total_loss,
+        #         eval_metric_ops=eval_metrics)
         else:
             output_spec = tf.estimator.EstimatorSpec(
                 mode=mode, predictions=predicts)#predicts.shape==(batch_size,max_seq_length)
@@ -537,31 +497,31 @@ def main(_):
             is_training=True,
             drop_remainder=True)
         estimator.train(input_fn=train_input_fn, max_steps=num_train_steps)
-    if FLAGS.do_eval:
-        eval_examples = processor.get_dev_examples(FLAGS.data_dir)
-        eval_file = os.path.join(FLAGS.output_dir, "eval.tf_record")
-        batch_tokens,batch_labels = filed_based_convert_examples_to_features(
-            eval_examples, label_list, FLAGS.max_seq_length, tokenizer, eval_file)
-        logging.info("***** Running evaluation *****")
-        logging.info("  Num examples = %d", len(eval_examples))
-        logging.info("  Batch size = %d", FLAGS.eval_batch_size)
+    # if FLAGS.do_eval:
+    #     eval_examples = processor.get_dev_examples(FLAGS.data_dir)
+    #     eval_file = os.path.join(FLAGS.output_dir, "eval.tf_record")
+    #     batch_tokens,batch_labels = filed_based_convert_examples_to_features(
+    #         eval_examples, label_list, FLAGS.max_seq_length, tokenizer, eval_file)
+    #     logging.info("***** Running evaluation *****")
+    #     logging.info("  Num examples = %d", len(eval_examples))
+    #     logging.info("  Batch size = %d", FLAGS.eval_batch_size)
 
-        eval_input_fn = file_based_input_fn_builder(
-            input_file=eval_file,
-            seq_length=FLAGS.max_seq_length,
-            is_training=False,
-            drop_remainder=False)
-        result = estimator.evaluate(input_fn=eval_input_fn)#result={"confusion_matrix":...}
-        output_eval_file = os.path.join(FLAGS.output_dir, "eval_results.txt")
-        with open(output_eval_file,"w") as wf:
-            logging.info("***** Eval results *****")
-            confusion_matrix = result["confusion_matrix"]
-            p,r,f = metrics.calculate(confusion_matrix,len(label_list)-1)
-            logging.info("***********************************************")
-            logging.info("********************P = %s*********************",  str(p))
-            logging.info("********************R = %s*********************",  str(r))
-            logging.info("********************F = %s*********************",  str(f))
-            logging.info("***********************************************")
+    #     eval_input_fn = file_based_input_fn_builder(
+    #         input_file=eval_file,
+    #         seq_length=FLAGS.max_seq_length,
+    #         is_training=False,
+    #         drop_remainder=False)
+    #     result = estimator.evaluate(input_fn=eval_input_fn)#result={"confusion_matrix":...}
+    #     output_eval_file = os.path.join(FLAGS.output_dir, "eval_results.txt")
+    #     with open(output_eval_file,"w") as wf:
+    #         logging.info("***** Eval results *****")
+    #         confusion_matrix = result["confusion_matrix"]
+    #         p,r,f = metrics.calculate(confusion_matrix,len(label_list)-1)
+    #         logging.info("***********************************************")
+    #         logging.info("********************P = %s*********************",  str(p))
+    #         logging.info("********************R = %s*********************",  str(r))
+    #         logging.info("********************F = %s*********************",  str(f))
+    #         logging.info("***********************************************")
 
 
     if FLAGS.do_predict:
@@ -588,15 +548,8 @@ def main(_):
 
         result = estimator.predict(input_fn=predict_input_fn)#result就是predictions,shape==(batch_size,max_seq_length)
         output_predict_file = os.path.join(FLAGS.output_dir, "label_test.txt")
-        #here if the tag is "X" means it belong to its before token, here for convenient evaluate use
-        # conlleval.pl we  discarding it directly
         Writer(output_predict_file,result,batch_tokens,batch_labels,id2label)
 
 
 if __name__ == "__main__":
-    flags.mark_flag_as_required("data_dir")
-    flags.mark_flag_as_required("task_name")
-    flags.mark_flag_as_required("vocab_file")
-    flags.mark_flag_as_required("bert_config_file")
-    flags.mark_flag_as_required("output_dir")
     tf.app.run()
